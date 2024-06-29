@@ -1,66 +1,18 @@
-## HailEris
+## OSX-LCD
 
-The best way to setup a new MacOS **GOLDEN APPLE** development environment. This codebase uses Dorthy to handle the Dotfiles, as well as a bunch of other shell tweaks & goodies.
+This project involves a MacOS computer talking to an Arduino via USB Serial communication. The Arduino is hooked up to an LCD Screen, and the data sent over serial, are the Mac's system stats, specifically these three: CPU %, Memory Usage, and GPU %.
 
-There is a couple of things we will need to do first, install Xcode Tools, install homebrew, and either install git and clone the repo, or download the repo locally and unpack it. To get started run the following commands
+The LCD Screen then displays these stats per the Arduino's instructions. 
 
-```shell
-  $ xcode-select install
-```
-
-Then install Homebrew
+The code running on the MacOS machine is written in Python 3 and requires pyserial. 
 
 ```shell
-  $ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ $ source ./venv/bin/activate
+ $ python3 run.py
 ```
 
-Then get this repo in one of the two ways
+### • ARDUINO
 
-```sass
-  # Git Method
-  brew install git
-  git clone https://github.com/johnny13/dotfiles
-```
+To install the code on the arduino use the Arduino IDE and open up the Arduino folder. 
 
-Or simply go here and download as zip and upack: [https://github.com/johnny13/dotfiles](https://github.com/johnny13/dotfiles)
-
-
-### Run Brewfile
-
-Now that you have the requirements met, assuming you unpacked the repo to `~/Developer/dotfiles` you can run the following:
-
-```shell
-  $ cd ~/Developer/dotfiles 
-  $ brew bundle install 
-```
-
-This will take a while to complete, and when it is done, you will have all the required Apps & Packages that are required for MacOS Web Development, Shell Scripting, and other various programming related items
-
-
-## • Folder
-
-TODO: The folder structure needs to detailed here
-
-1. **bin** ❱ command line scripts
-2. **dist** ❱ finalized output
-3. **public** ❱ static files
-
-> NOTES:
-> • Anything that needs to be noted goes here
-
----
-
-### • Code Function
-
-TODO: This might be needed to explain how a function works or whatever
-
-```sh
-   ━━❪ public ❫
-   ━━━▶ demo
-   ━━━▶ favicon
-   ━━━▶ fonts
-```
-
----
-
-### • TBD
+_NOTE: The arduino code also features code to run WS2812 LED lights along side the LCD screen. This is entirely optional and has very little to do with the Python portion of the project._
