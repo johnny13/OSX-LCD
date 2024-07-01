@@ -35,8 +35,8 @@ def getComputerGPUStat():
 
 
 while True:
-    memoryValue = str(getComputerMemoryStat())
-    cpuValue = str(getComputerCPUStat())
+    memoryValue = str(round(getComputerMemoryStat()))
+    cpuValue = str(round(getComputerCPUStat()))
     finalString = memoryValue + "," + cpuValue
     print('StringToSend', finalString)
     time.sleep(1) # Sleep for 1 seconds

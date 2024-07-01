@@ -46,8 +46,8 @@ def write_read(x):
 
 
 while True:
-    memoryValue = str(getComputerMemoryStat())
-    cpuValue = str(getComputerCPUStat())
+    memoryValue = str(round(getComputerMemoryStat()))
+    cpuValue = str(round(getComputerCPUStat()))
     finalString = memoryValue + "," + cpuValue
     print('sending', finalString)
     value = write_read(finalString)
