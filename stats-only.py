@@ -40,3 +40,13 @@ while True:
     finalString = memoryValue + "," + cpuValue
     print('StringToSend', finalString)
     time.sleep(1) # Sleep for 1 seconds
+
+
+    if b"K" in value:
+        print('STATS OK', value)
+    elif b"N" in value:
+        print('FAILED', value)
+    elif b"T" in value:
+        print('TEMP UPDATED', value)
+    else:
+        print('UNKN ERROR: ', value)

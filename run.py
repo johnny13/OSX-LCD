@@ -57,10 +57,13 @@ while True:
         memoryValue = str(round(getComputerMemoryStat()))
         cpuValue = str(round(getComputerCPUStat()))
         finalString = memoryValue + "," + cpuValue
-        print('sending', finalString)
+        print('SEND ', finalString)
         value = write_read(finalString)
     
-        print(value)
-    
+        if b"K" in value:
+            print("OK| ", value)
+        else:
+            print(value)
+            
     # print(value)  # printing the value
     time.sleep(1) # Sleep for 1 seconds
