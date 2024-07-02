@@ -5,9 +5,10 @@ import time
 import psutil
 
 arduino = serial.Serial(port='/dev/tty.usbserial-1450',
-                        baudrate=115200,
+                        baudrate=9600,
                         timeout=.1)
 
+start = False
 
 def getComputerMemoryStat():
     # gives a single float value
@@ -46,10 +47,20 @@ def write_read(x):
 
 
 while True:
-    memoryValue = str(round(getComputerMemoryStat()))
-    cpuValue = str(round(getComputerCPUStat()))
-    finalString = memoryValue + "," + cpuValue
-    print('sending', finalString)
-    value = write_read(finalString)
-    print(value)  # printing the value
+    if start != True:
+        connectString = arduino.readline()
+    
+    if b"F" in connectString:
+        start = True
+    
+    if start:
+        memoryValue = str(round(getComputerMemoryStat()))
+        cpuValue = str(round(getComputerCPUStat()))
+        finalString = memoryValue + "," + cpuValue
+        print('sending', finalString)
+        value = write_read(finalString)
+    
+        print(value)
+    
+    # print(value)  # printing the value
     time.sleep(1) # Sleep for 1 seconds
