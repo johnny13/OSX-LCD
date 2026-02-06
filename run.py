@@ -1,69 +1,66 @@
 #!/usr/bin/env python
-# Importing Libraries
-import serial
-import time
 import psutil
+import time
+import subprocess
+import re
+import serial
+import serial.tools.list_ports
 
-arduino = serial.Serial(port='/dev/tty.usbserial-1450',
-                        baudrate=9600,
-                        timeout=.1)
+def find_arduino():
+    for p in serial.tools.list_ports.comports():
+        if any(x in p.description or x in p.device for x in ['Arduino', 'usbserial', 'tty.usb']):
+            return p.device
+    return None
 
-start = False
+def get_gpu_stat():
+    try:
+        cmd = "ioreg -l | grep \"Device Utilization %\""
+        output = subprocess.check_output(cmd, shell=True).decode('utf-8')
+        matches = re.findall(r'"Device Utilization %"=(\d+)', output)
+        if matches:
+            return min(int(matches[0]), 100)
+    except: pass
+    return 0
 
-def getComputerMemoryStat():
-    # gives a single float value
-    psutil.cpu_percent()
-    # gives an object with many fields
-    psutil.virtual_memory()
-    # you can convert that object to a dictionary
-    dict(psutil.virtual_memory()._asdict())
-    # you can have the percentage of used RAM
-    memoryPercent = psutil.virtual_memory().percent
-    #print('memPercent', memoryPercent)
-    return memoryPercent
+# --- SETUP ---
+port = find_arduino()
+arduino = None
+if port:
+    arduino = serial.Serial(port=port, baudrate=9600, timeout=0.1)
+    print(f"Connected to Arduino on {port}")
 
+psutil.cpu_percent(interval=None) # Seed CPU
 
-def getComputerCPUStat():
-	# start the monitoring (first call always returns 0.0)
-    psutil.cpu_percent()
-    time.sleep(0.5)
-    cpuPercent = psutil.cpu_percent()
-    #print('cpuPercent', cpuPercent)
-    return cpuPercent
+print("System Monitor Active. Sending data...")
 
+try:
+    while True:
+        # 1. Collect Stats
+        cpu = round(psutil.cpu_percent(interval=None))
+        ram = round(psutil.virtual_memory().percent)
+        gpu = get_gpu_stat()
 
-# TODO: get actual GPU value not CPU...
-def getComputerGPUStat():
-    gpuPercent = psutil.cpu_percent()
-    print('gpuPercent', gpuPercent)
-    return gpuPercent
+        # 2. Format CSV (Arduino expects: RAM,CPU,GPU)
+        data_string = f"{ram},{cpu},{gpu}\n"
 
+        if arduino:
+            arduino.write(data_string.encode())
+            arduino.flush() # Ensure the data is physically sent
 
-def write_read(x):
-    arduino.write(bytes(x, 'utf-8'))
-    time.sleep(0.05)
-    data = arduino.readline()
-    return data
+            # Give the Arduino a moment to process the LCD and respond
+            time.sleep(0.1) 
 
-
-while True:
-    if start != True:
-        connectString = arduino.readline()
-    
-    if b"F" in connectString:
-        start = True
-    
-    if start:
-        memoryValue = str(round(getComputerMemoryStat()))
-        cpuValue = str(round(getComputerCPUStat()))
-        finalString = memoryValue + "," + cpuValue
-        print('SEND ', finalString)
-        value = write_read(finalString)
-    
-        if b"K" in value:
-            print("OK| ", value)
+            response = arduino.readline().decode().strip()
+            if "K" in response:
+                print(f"SENT: {data_string.strip()} | STATUS: OK")
+            else:
+                # If we get here, the Arduino might be busy drawing the LCD
+                print(f"SENT: {data_string.strip()} | STATUS: BUSY/NO ACK")
         else:
-            print(value)
-            
-    # print(value)  # printing the value
-    time.sleep(1) # Sleep for 1 seconds
+            print(f"OFFLINE - CPU:{cpu}% RAM:{ram}% GPU:{gpu}%")
+
+        time.sleep(1) # Send update once per second
+
+except KeyboardInterrupt:
+    print("\nClosing...")
+    if arduino: arduino.close()

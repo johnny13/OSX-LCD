@@ -1,52 +1,67 @@
 #!/usr/bin/env python
-# Importing Libraries
-import serial
-import time
 import psutil
+import time
+import subprocess
+import re
 import os
 
-def getComputerMemoryStat():
-    # gives a single float value
-    psutil.cpu_percent()
-    # gives an object with many fields
-    psutil.virtual_memory()
-    # you can convert that object to a dictionary
-    dict(psutil.virtual_memory()._asdict())
-    # you can have the percentage of used RAM
-    memoryPercent = psutil.virtual_memory().percent
-    #print('memPercent', memoryPercent)
-    return memoryPercent
+# --- SETTINGS ---
+UPDATE_SPEED = 1.0  # Seconds between refreshes
 
+def get_gpu_stat():
+    """
+    Targets the AMD Navi/Intel-Mac 'Device Utilization %' key.
+    """
+    try:
+        # Strict grep for the Device Utilization key
+        cmd = "ioreg -l | grep \"Device Utilization %\""
+        output = subprocess.check_output(cmd, shell=True).decode('utf-8')
+        
+        # Extract the integer after the '='
+        matches = re.findall(r'"Device Utilization %"=(\d+)', output)
+        
+        if matches:
+            # Return the first match, capped at 100
+            val = int(matches[0])
+            return min(val, 100)
+    except Exception:
+        pass
+    return 0
 
-def getComputerCPUStat():
-	# start the monitoring (first call always returns 0.0)
-    psutil.cpu_percent()
-    time.sleep(0.5)
-    cpuPercent = psutil.cpu_percent()
-    #print('cpuPercent', cpuPercent)
-    return cpuPercent
+def print_dashboard(cpu, mem, gpu):
+    """
+    Clears the terminal and prints a clean layout.
+    """
+    # Clear the terminal screen (works on macOS/Linux)
+    os.system('clear')
+    
+    print("=" * 40)
+    print("      HACKINTOSH SYSTEM MONITOR")
+    print("=" * 40)
+    print(f" CPU USAGE:   [{'#' * (cpu // 5)}{' ' * (20 - (cpu // 5))}] {cpu}%")
+    print(f" RAM USAGE:   [{'#' * (mem // 5)}{' ' * (20 - (mem // 5))}] {mem}%")
+    print(f" GPU LOAD:    [{'#' * (gpu // 5)}{' ' * (20 - (gpu // 5))}] {gpu}%")
+    print("-" * 40)
+    print(f" RAW STRING:  {mem},{cpu},{gpu}")
+    print("=" * 40)
+    print(" Press Ctrl+C to exit")
 
+# --- MAIN LOOP ---
+# Seed the CPU percentage (first call is always 0)
+psutil.cpu_percent(interval=None)
 
-# TODO: get actual GPU value not CPU...
-def getComputerGPUStat():
-    gpuPercent = "!!?"
-    #print('gpuPercent', gpuPercent)
-    return gpuPercent
+try:
+    while True:
+        # Gather data
+        cpu = round(psutil.cpu_percent(interval=None))
+        mem = round(psutil.virtual_memory().percent)
+        gpu = get_gpu_stat()
 
+        # Update the console
+        print_dashboard(cpu, mem, gpu)
+        
+        # Wait for next update
+        time.sleep(UPDATE_SPEED)
 
-while True:
-    memoryValue = str(round(getComputerMemoryStat()))
-    cpuValue = str(round(getComputerCPUStat()))
-    finalString = memoryValue + "," + cpuValue
-    print('StringToSend', finalString)
-    time.sleep(1) # Sleep for 1 seconds
-
-
-    if b"K" in value:
-        print('STATS OK', value)
-    elif b"N" in value:
-        print('FAILED', value)
-    elif b"T" in value:
-        print('TEMP UPDATED', value)
-    else:
-        print('UNKN ERROR: ', value)
+except KeyboardInterrupt:
+    print("\n\nMonitor Stopped.")
