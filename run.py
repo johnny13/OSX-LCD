@@ -14,12 +14,22 @@ def find_arduino():
 
 def get_gpu_stat():
     try:
-        cmd = "ioreg -l | grep \"Device Utilization %\""
-        output = subprocess.check_output(cmd, shell=True).decode('utf-8')
-        matches = re.findall(r'"Device Utilization %"=(\d+)', output)
-        if matches:
-            return min(int(matches[0]), 100)
-    except: pass
+        cmd = "ioreg -l | grep -E 'Device Utilization %|GPU Activity\\(%\\)'"
+        output = subprocess.check_output(cmd, shell=True, timeout=3).decode('utf-8').strip()
+        
+        activity_matches = re.findall(r'"GPU Activity\(\%"\)=(\d+)', output)
+        device_matches   = re.findall(r'"Device Utilization %"=(\d+)', output)
+        
+        values = []
+        if activity_matches:
+            values.extend(int(v) for v in activity_matches)
+        if device_matches:
+            values.extend(int(v) for v in device_matches)
+        
+        if values:
+            return min(max(max(values), 0), 100)
+    except Exception as e:
+        print(f"GPU parse error: {e}")
     return 0
 
 # --- SETUP ---
@@ -30,37 +40,74 @@ if port:
     print(f"Connected to Arduino on {port}")
 
 psutil.cpu_percent(interval=None) # Seed CPU
-
 print("System Monitor Active. Sending data...")
 
 try:
     while True:
-        # 1. Collect Stats
-        cpu = round(psutil.cpu_percent(interval=None))
+        # Reconnect if needed
+        if arduino is None or not arduino.is_open:
+            print("Arduino not connected or port invalid - attempting reconnect...", flush=True)
+            if arduino:
+                try:
+                    arduino.close()
+                except:
+                    pass
+        
+            port = find_arduino()
+            if port:
+                try:
+                    arduino = serial.Serial(port=port, baudrate=9600, timeout=0.1)
+                    print(f"Connected to Arduino on {port}", flush=True)
+                    time.sleep(2.0)  # Give Arduino time to reset
+                    continue
+                except Exception as e:
+                    print(f"Failed to open port: {e}", flush=True)
+                    arduino = None
+
+            if arduino is None:
+                print("No Arduino port found - offline mode", flush=True)
+                cpu = round(psutil.cpu_percent(interval=0.2))
+                ram = round(psutil.virtual_memory().percent)
+                gpu = get_gpu_stat()
+                print(f"OFFLINE - CPU:{cpu}% RAM:{ram}% GPU:{gpu}%", flush=True)
+                time.sleep(2)
+                continue
+
+        # Collect stats
+        cpu = round(psutil.cpu_percent(interval=0.2))
         ram = round(psutil.virtual_memory().percent)
         gpu = get_gpu_stat()
 
-        # 2. Format CSV (Arduino expects: RAM,CPU,GPU)
-        data_string = f"{ram},{cpu},{gpu}\n"
+        # Determine Day vs Night (Night is 8 PM to 6 AM)
+        current_hour = time.localtime().tm_hour
+        is_night = 1 if (current_hour >= 20 or current_hour < 6) else 0
 
-        if arduino:
+        # Pack data string: RAM, CPU, GPU, NIGHT_FLAG
+        data_string = f"{ram},{cpu},{gpu},{is_night}\n"
+
+        try:
             arduino.write(data_string.encode())
-            arduino.flush() # Ensure the data is physically sent
+            arduino.flush()
 
-            # Give the Arduino a moment to process the LCD and respond
-            time.sleep(0.1) 
+            time.sleep(0.15)  # Give time for Arduino LCD processing
 
-            response = arduino.readline().decode().strip()
+            response = arduino.readline().decode('utf-8', errors='ignore').strip()
             if "K" in response:
-                print(f"SENT: {data_string.strip()} | STATUS: OK")
+                print(f"SENT: {data_string.strip()} | OK", flush=True)
             else:
-                # If we get here, the Arduino might be busy drawing the LCD
-                print(f"SENT: {data_string.strip()} | STATUS: BUSY/NO ACK")
-        else:
-            print(f"OFFLINE - CPU:{cpu}% RAM:{ram}% GPU:{gpu}%")
+                print(f"SENT: {data_string.strip()} | NO_ACK", flush=True)
 
-        time.sleep(1) # Send update once per second
+        except serial.SerialException as e:
+            print(f"Serial error: {e} → Will reconnect next loop", flush=True)
+            if arduino:
+                arduino.close()
+            arduino = None
+            time.sleep(1)
+
+        time.sleep(0.8)  # ~1 Hz
 
 except KeyboardInterrupt:
-    print("\nClosing...")
-    if arduino: arduino.close()
+    print("\nShutting down...")
+finally:
+    if arduino and arduino.is_open:
+        arduino.close()

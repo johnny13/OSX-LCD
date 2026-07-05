@@ -7,44 +7,38 @@
 #include <DHT11.h>
 #include "LEDAnimator.h"
 
-// --------------------[  SERIALS  ]-------
 #define SERIAL_BAUDRATE 9600
 
-// Change tracking to prevent LCD lag
 int lastCPU = -1, lastRAM = -1, lastGPU = -1;
 
-// --------------------[  HARDWARE  ]-------
 #define DHT11_PIN 7
 DHT11 dht11(DHT11_PIN);
 int CurrentTempInFarenheight = 0;
 
-// SCREEN CONFIG
 hd44780_I2Cexp lcd;
 const int LabelSize = 4; 
-const int BarWidth = 16; // 20 - 4
+const int BarWidth = 16;
 
-// LED CONFIG
 #define NUM_LEDS 81
 #define DATA_PIN 6
-#define BRIGHTNESS 50
+#define BRIGHTNESS 200
 
 FastLED_NeoPixel<NUM_LEDS, DATA_PIN, NEO_GRB> pixelStrip;
 LEDAnimator animator(&pixelStrip);
 
-// LCD CHARACTERS
 byte unused[8] = {0b11111,0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b11111};
 byte used[8] = {0b11111,0b11111,0b11111,0b11111,0b11111,0b11111,0b11111,0b11111};
 byte degreeSym[8] = {0b01110,0b01010,0b01110,0b00000,0b00000,0b00000,0b00000,0b00000};
 
-// STRINGS
 String temperatureHumidityString = "";
-String stringLEDLabel = "rnbw";
 String stringSpace = " ";
 
-// --------------------[  SETUP  ]-------
+unsigned long lastStatsReceived = 0;
+const unsigned long STATS_TIMEOUT_MS = 10000;
+
 void setup() {
   Serial.begin(SERIAL_BAUDRATE);
-  Serial.setTimeout(50); // Important: Don't let Serial hang
+  Serial.setTimeout(50);
   
   pixelStrip.begin();
   pixelStrip.setBrightness(BRIGHTNESS);
@@ -57,14 +51,63 @@ void setup() {
   
   lcdPrintStaticContent();
   Serial.println("SETUP DONE"); 
+
+  lastStatsReceived = millis();
 }
 
-// --------------------[  FUNCTIONS  ]-------
+void loop() {
+  unsigned long now = millis();
+  bool dataStale = (now - lastStatsReceived >= STATS_TIMEOUT_MS);
+  if (dataStale) {
+    animator.setStats(0, 0, 0, 0);
+  }
+
+  animator.update();
+
+  if (Serial.available() > 0) {
+    int inRAM = Serial.parseInt();
+    int inCPU = Serial.parseInt();
+    int inGPU = Serial.parseInt();
+    int inNight = Serial.parseInt(); // Read new day/night metric
+
+    // Robust clean up: Flush out everything up to the trailing newline character
+    while(Serial.available() > 0 && Serial.peek() != '\n') {
+      Serial.read();
+    }
+    if(Serial.available() > 0) Serial.read(); // Consume the '\n'
+
+    lastStatsReceived = now;
+
+    if(inCPU != lastCPU) { printProgressBar(inCPU / 100.0, 0); lastCPU = inCPU; }
+    if(inRAM != lastRAM) { printProgressBar(inRAM / 100.0, 1); lastRAM = inRAM; }
+    if(inGPU != lastGPU) { printProgressBar(inGPU / 100.0, 2); lastGPU = inGPU; }
+
+    animator.setStats(inCPU, inRAM, inGPU, inNight);       
+       
+    Serial.println("K");
+    Serial.flush();
+  }
+
+  static unsigned long lastTempUpdate = 0;
+  if (now - lastTempUpdate >= 5000) { 
+      lastTempUpdate = now;
+      tempReader();
+      const char* cMode = animator.getCurrentModeCode();
+      String tempDisplay = String(cMode) + stringSpace + temperatureHumidityString;
+      lcdPrintTempAndColorContent(tempDisplay);
+  }
+
+  static unsigned long lastScreenReset = 0;
+  if (now - lastScreenReset >= 60000) {
+      lastScreenReset = now;
+      lcdPrintStaticContent();
+      lastCPU = -1; lastRAM = -1; lastGPU = -1; 
+  }
+}
 
 void printProgressBar(float percentageAmountFull, int startRow) {
   lcd.setCursor(LabelSize, startRow);
   int fillAmount = floor(BarWidth * percentageAmountFull);
-  
   for(int i = 0; i < BarWidth; i++) {
     if(i < fillAmount) lcd.write(1);
     else lcd.write(0);
@@ -93,47 +136,4 @@ void lcdPrintTempAndColorContent(String amountToDisplay) {
   lcd.print(amountToDisplay);
   lcd.write(2);
   lcd.print("F");
-}
-
-// --------------------[  LOOP  ]-------
-void loop() {
-  // 1. Update Animations (Non-blocking)
-  animator.update();
-
-  // 2. Handle Serial Data
-  if (Serial.available() > 0) {
-    // Expected format: RAM,CPU,GPU\n
-    int inRAM = Serial.parseInt(); 
-    int inCPU = Serial.parseInt();
-    int inGPU = Serial.parseInt();
-
-    if (Serial.read() == '\n') {
-       // Only update LCD if data has actually changed (Saves I2C bandwidth)
-       if(inCPU != lastCPU) { printProgressBar(inCPU / 100.0, 0); lastCPU = inCPU; }
-       if(inRAM != lastRAM) { printProgressBar(inRAM / 100.0, 1); lastRAM = inRAM; }
-       if(inGPU != lastGPU) { printProgressBar(inGPU / 100.0, 2); lastGPU = inGPU; }
-
-       animator.setStats(inCPU, inRAM, inGPU);       
-       
-       Serial.println("K"); // Handshake
-       Serial.flush();
-    }
-  }
-
-  // 3. Periodic Tasks
-  static unsigned long lastTempUpdate = 0;
-  if (millis() - lastTempUpdate >= 5000) { 
-      lastTempUpdate = millis();
-      tempReader();
-      String tempDisplay = stringLEDLabel + stringSpace + temperatureHumidityString;
-      lcdPrintTempAndColorContent(tempDisplay);
-  }
-
-  static unsigned long lastScreenReset = 0;
-  if (millis() - lastScreenReset >= 60000) {
-      lastScreenReset = millis();
-      lcdPrintStaticContent();
-      // Reset last values to force a redraw on next serial packet
-      lastCPU = -1; lastRAM = -1; lastGPU = -1; 
-  }
 }
