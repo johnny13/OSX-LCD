@@ -21,7 +21,7 @@ const int BarWidth = 16;
 
 #define NUM_LEDS 81
 #define DATA_PIN 6
-#define BRIGHTNESS 200
+#define BRIGHTNESS 125
 
 FastLED_NeoPixel<NUM_LEDS, DATA_PIN, NEO_GRB> pixelStrip;
 LEDAnimator animator(&pixelStrip);
