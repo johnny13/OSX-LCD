@@ -9,7 +9,16 @@
 ![pyserial](https://img.shields.io/badge/Library-pyserial-yellow)
 ![hd44780](https://img.shields.io/badge/Library-hd44780_I2C-lightblue)
 
-A high-performance system monitoring solution designed specifically for Hackintosh and Mac builds. This project pipes real-time hardware metrics from macOS across a Serial connection to an Arduino-driven 20x4 I2C LCD and an 81-pixel WS2812B LED strip.
+A high-performance system monitoring solution designed specifically for Hackintosh and Intel Mac builds using an AMD GPU. This project pipes real-time hardware metrics from macOS across a Serial connection to an Arduino-driven 20x4 I2C LCD and an 81-pixel WS2812B LED strip.
+
+#### NOTES ON NVIDIA GPU
+
+Adapting this to use an NVIDIA GPU should be fairly easy as there are more Nvidia Tools than AMD Tools it seems, all you need is a way of pulling the current workload via python and swapping that out for the AMD GPU call. 
+
+#### NOTES ON LED ANIMATIONS
+
+All of the FastLED code lives in the `LEDAnimator.h` file, and should be very familiar to anyone who has used that library, and even those who have not, I tried to be as straight forward with the code as possible.
+
 
 ---
 
@@ -51,3 +60,62 @@ Inside your project directory, set up your `venv` and install the optimized syst
 python3 -m venv venv
 source venv/bin/activate
 pip install psutil pyserial
+```
+
+### Step 2: Configure the Launch Agent Plist
+Create or modify your background configuration file at `~/Library/LaunchAgents/com.user.lcdstats.plist`.
+
+Important: macOS launchd requires absolute file paths. Run pwd in your terminal to find your exact project directory and substitute it below:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "[http://www.apple.com/DTDs/PropertyList-1.0.dtd](http://www.apple.com/DTDs/PropertyList-1.0.dtd)">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.lcdstats</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOUR_USERNAME/path/to/lcdStats/venv/bin/python</string>
+        <string>/Users/YOUR_USERNAME/path/to/lcdStats/run.py</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/com.user.lcdstats.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.user.lcdstats.err.log</string>
+</dict>
+</plist>
+```
+
+### Service Management Workflow
+Modern macOS versions have deprecated the traditional launchctl load/unload commands. Use the modern service engine workflow to control and monitor your setup:
+
+#### To Register and Start the Daemon:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.lcdstats.plist
+```
+
+#### To View Active Live Status Streams:
+```bash
+# Monitor standard logging output (Handshakes, metrics sent)
+tail -f /tmp/com.user.lcdstats.out.log
+
+# Monitor system exceptions or environment crashes
+tail -f /tmp/com.user.lcdstats.err.log
+```
+
+#### To Stop the Daemon (For flashing the Arduino):
+The Python script locks the serial port interface while active. You must terminate the daemon registration before uploading modifications via the Arduino IDE:
+
+```bash
+launchctl bootout gui/$(id -u)/com.user.lcdstats
+```
