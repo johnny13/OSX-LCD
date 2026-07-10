@@ -3,7 +3,7 @@
 #include <math.h>
 #include <Wire.h>
 #include <hd44780.h>
-#include <hd44780ioClass/hd44780_I2Cexp.h> 
+#include <hd44780ioClass/hd44780_I2Cexp.h>
 #include <DHT11.h>
 #include "LEDAnimator.h"
 
@@ -16,7 +16,7 @@ DHT11 dht11(DHT11_PIN);
 int CurrentTempInFarenheight = 0;
 
 hd44780_I2Cexp lcd;
-const int LabelSize = 4; 
+const int LabelSize = 4;
 const int BarWidth = 16;
 
 #define NUM_LEDS 81
@@ -39,7 +39,7 @@ const unsigned long STATS_TIMEOUT_MS = 10000;
 void setup() {
   Serial.begin(SERIAL_BAUDRATE);
   Serial.setTimeout(50);
-  
+
   pixelStrip.begin();
   pixelStrip.setBrightness(BRIGHTNESS);
 
@@ -48,9 +48,9 @@ void setup() {
   lcd.createChar(0, unused);
   lcd.createChar(1, used);
   lcd.createChar(2, degreeSym);
-  
+
   lcdPrintStaticContent();
-  Serial.println("SETUP DONE"); 
+  Serial.println("SETUP DONE");
 
   lastStatsReceived = millis();
 }
@@ -82,14 +82,14 @@ void loop() {
     if(inRAM != lastRAM) { printProgressBar(inRAM / 100.0, 1); lastRAM = inRAM; }
     if(inGPU != lastGPU) { printProgressBar(inGPU / 100.0, 2); lastGPU = inGPU; }
 
-    animator.setStats(inCPU, inRAM, inGPU, inNight);       
-       
+    animator.setStats(inCPU, inRAM, inGPU, inNight);
+
     Serial.println("K");
     Serial.flush();
   }
 
   static unsigned long lastTempUpdate = 0;
-  if (now - lastTempUpdate >= 5000) { 
+  if (now - lastTempUpdate >= 5000) {
       lastTempUpdate = now;
       tempReader();
       const char* cMode = animator.getCurrentModeCode();
@@ -101,7 +101,7 @@ void loop() {
   if (now - lastScreenReset >= 60000) {
       lastScreenReset = now;
       lcdPrintStaticContent();
-      lastCPU = -1; lastRAM = -1; lastGPU = -1; 
+      lastCPU = -1; lastRAM = -1; lastGPU = -1;
   }
 }
 
