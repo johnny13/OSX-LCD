@@ -37,7 +37,8 @@ public:
   const uint8_t GPU_HIGH_THRESHOLD = 60;
   const uint32_t STRESS_HOLD_TIME_MS = 1500;  // 1.5 seconds sustained load trigger
 
-  uint8_t palette[6] = { 0, 32, 64, 96, 160, 192 };  // Daytime colors
+  // MODIFIED: Removed '0' (Red) and shifted palette to start at 32 (Orange/Yellow) up to 192 (Purple)
+  uint8_t palette[6] = { 32, 64, 96, 128, 160, 192 };  
   uint8_t paletteIndex = 0;
   uint32_t phaseStart = 0;
 
@@ -88,8 +89,6 @@ public:
     gpu = g;
     isNight = (nightFlag == 1);
     lastStatsUpdate = millis();
-
-    // FIX: Removed the buggy state-clearing block that caused the permanent red deadlock!
   }
 
   void setTemp(int t) {
@@ -126,21 +125,23 @@ public:
     // Priority 2: High System Load (Aggressive Red Strobe)
     if (phase == HIGH_STRESS) {
       bool flashOn = (now / 150) % 2 == 0;
-      renderSolidHSV(0, 255, flashOn ? 255 : 0);
+      renderSolidHSV(0, 255, flashOn ? 255 : 0); // Pure Red (Hue 0) preserved here!
       strip->show();
       return;
     }
 
     uint16_t speedFactor = getSpeedMultiplier();
 
-    // Priority 3: NIGHTTIME MODE (Vibrant, Flowing Active Rainbow Wheel)
+    // Priority 3: NIGHTTIME MODE (Vibrant, Flowing Active Rainbow Wheel - Red Filtered)
     if (isNight) {
       uint32_t rainbowSpeed = now * speedFactor;
       uint8_t baseHue = (rainbowSpeed / 15) & 0xFF;
 
       for (int i = 0; i < 81; i++) {
         uint8_t pixelHue = baseHue + (i * 4);
-        strip->setPixelColor(i, strip->gamma32(strip->ColorHSV(pixelHue * 256, 255, 220)));
+        // MODIFIED: Maps the hue spectrum away from the red zone (0-31 and 221-255)
+        uint8_t safeHue = map(pixelHue, 0, 255, 32, 220); 
+        strip->setPixelColor(i, strip->gamma32(strip->ColorHSV(safeHue * 256, 255, 220)));
       }
       strip->show();
       return;
@@ -182,7 +183,6 @@ private:
     if (phase == TEMP_ALERT)
       return;
 
-    // Triggers if ANY resource exceeds its defined limit
     bool resourcesHigh = (cpu >= CPU_HIGH_THRESHOLD) || (ram >= RAM_HIGH_THRESHOLD) || (gpu >= GPU_HIGH_THRESHOLD);
 
     if (resourcesHigh) {
@@ -199,7 +199,7 @@ private:
     } else {
       highCpuStartTime = 0;
       if (isHighStress) {
-        phase = returnPhase;  // Drops alert phase safely back to normal
+        phase = returnPhase;
         phaseStart = now;
         isHighStress = false;
       }
@@ -222,6 +222,7 @@ private:
     return 1;
   }
 
+  // NOTE: Wheel() is no longer utilized by theaterChaseRainbow to prevent red creeping in.
   uint32_t Wheel(byte WheelPos) {
     WheelPos = 255 - WheelPos;
     if (WheelPos < 85) {
@@ -237,7 +238,6 @@ private:
 
   void maybeTriggerTempAlert(uint32_t now) {
     static uint32_t lastAlertTime = 0;
-    // Trigger at 85°F. Change this to 74°F if you want to force test it right now!
     if (tempF > 85 && (now - lastAlertTime > 30000)) {
       lastAlertTime = now;
       returnPhase = phase;
@@ -263,7 +263,6 @@ private:
       return;
     }
 
-    // Map smoothly from Cool Cyan (160) to Alarm Red (0) based on temp scale
     uint8_t hue = map(tempF, 60, 100, 160, 0);
     hue = constrain(hue, 0, 160);
     uint8_t breath = beatsin8(12, 120, 255);
@@ -286,12 +285,12 @@ private:
       paletteIndex = 0;
       currentHue = palette[5];
       targetHue = palette[0];
-      nextPhase(COLOR_CHASE);  // <-- FIX: Changed from COLOR_FADE
+      nextPhase(COLOR_CHASE);
       return;
     }
     currentHue = targetHue;
     targetHue = palette[paletteIndex + 1];
-    nextPhase(COLOR_CHASE);  // <-- FIX: Changed from COLOR_FADE
+    nextPhase(COLOR_CHASE);
   }
 
   void renderSolid(uint8_t hue, uint8_t bright) {
@@ -312,33 +311,32 @@ private:
   }
 
   void theaterChaseRainbow() {
-    // Throttle execution so it moves at a viewable human speed (every 100ms)
     uint32_t now = millis();
     if (now - lastUpdate < 100) return;
     lastUpdate = now;
 
     static int j = 0, q = 0;
 
-    // Clear old positions first to prevent a trailing smear effect
     for (int i = 0; i < strip->numPixels(); i++) {
       strip->setPixelColor(i, 0);
     }
 
-    // Light up every third pixel matching the shifting pattern
     for (int i = 0; i < strip->numPixels(); i = i + 3) {
-      if (i + q < strip->numPixels()) {  // Safety check to prevent array index overflow
-        strip->setPixelColor(i + q, Wheel((i + j) % 255));
+      if (i + q < strip->numPixels()) {
+        // MODIFIED: Shifted away from RGB Wheel() to use a Red-Filtered HSV map
+        uint8_t rawHue = (i + j) % 255;
+        uint8_t safeHue = map(rawHue, 0, 255, 32, 220); 
+        strip->setPixelColor(i + q, strip->gamma32(strip->ColorHSV(safeHue * 256, 255, 255)));
       }
     }
 
-    q++;  // Shift the chase pattern forward
+    q++;
     if (q >= 3) {
       q = 0;
-      j += 2;  // Step through the color wheel (increase to color-cycle faster)
+      j += 2;
       if (j >= 256)
         j = 0;
     }
-    // Removed duplicate strip->show() - update() handles this perfectly!
   }
 };
 
