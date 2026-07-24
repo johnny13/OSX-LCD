@@ -1,11 +1,33 @@
-#include <FastLED_NeoPixel.h>
 #include <Streaming.h>
 #include <math.h>
 #include <Wire.h>
 #include <hd44780.h>
 #include <hd44780ioClass/hd44780_I2Cexp.h>
 #include <DHT11.h>
+
+// --- ACTIVE: AVANTLUMI ANIMATOR ---
+// #include <AvantLumi.h>
+// #include "LUMIAnimator.h"
+
+// #define NUM_LEDS 81
+// #define DATA_PIN 6
+// #define BRIGHTNESS 125
+
+// AvantLumi pixelStrip(NUM_LEDS, DATA_PIN);
+// LUMIAnimator animator(&pixelStrip);
+
+/* 
+// --- SWAP BLOCK: ORIGINAL FASTLED ANIMATOR ---
+*/
+#include <FastLED_NeoPixel.h>
 #include "LEDAnimator.h"
+
+#define NUM_LEDS 81
+#define DATA_PIN 6
+#define BRIGHTNESS 125
+
+FastLED_NeoPixel<NUM_LEDS, DATA_PIN, NEO_GRB> pixelStrip;
+LEDAnimator animator(&pixelStrip);
 
 #define SERIAL_BAUDRATE 9600
 
@@ -19,15 +41,8 @@ hd44780_I2Cexp lcd;
 const int LabelSize = 4;
 const int BarWidth = 16;
 
-#define NUM_LEDS 81
-#define DATA_PIN 6
-#define BRIGHTNESS 125
-
-FastLED_NeoPixel<NUM_LEDS, DATA_PIN, NEO_GRB> pixelStrip;
-LEDAnimator animator(&pixelStrip);
-
-byte unused[8] = {0b11111,0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b11111};
-byte used[8] = {0b11111,0b11111,0b11111,0b11111,0b11111,0b11111,0b11111,0b11111};
+byte unused[8]    = {0b11111,0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b11111};
+byte used[8]      = {0b11111,0b11111,0b11111,0b11111,0b11111,0b11111,0b11111,0b11111};
 byte degreeSym[8] = {0b01110,0b01010,0b01110,0b00000,0b00000,0b00000,0b00000,0b00000};
 
 String temperatureHumidityString = "";
@@ -38,7 +53,6 @@ const unsigned long STATS_TIMEOUT_MS = 10000;
 
 void setup() {
   Serial.begin(SERIAL_BAUDRATE);
-  Serial.setTimeout(50);
 
   pixelStrip.begin();
   pixelStrip.setBrightness(BRIGHTNESS);
@@ -57,6 +71,8 @@ void setup() {
 
 void loop() {
   unsigned long now = millis();
+  
+  // Timeout check for stale data
   bool dataStale = (now - lastStatsReceived >= STATS_TIMEOUT_MS);
   if (dataStale) {
     animator.setStats(0, 0, 0, 0);
@@ -64,30 +80,32 @@ void loop() {
 
   animator.update();
 
+  // Non-blocking full line reading
   if (Serial.available() > 0) {
-    int inRAM = Serial.parseInt();
-    int inCPU = Serial.parseInt();
-    int inGPU = Serial.parseInt();
-    int inNight = Serial.parseInt(); // Read new day/night metric
+    String inputLine = Serial.readStringUntil('\n');
+    inputLine.trim();
 
-    // Robust clean up: Flush out everything up to the trailing newline character
-    while(Serial.available() > 0 && Serial.peek() != '\n') {
-      Serial.read();
+    if (inputLine.length() > 0) {
+      int inCPU = 0, inRAM = 0, inGPU = 0, inNight = 0;
+      
+      // Parse CSV format: CPU,RAM,GPU,Night
+      int parsedCount = sscanf(inputLine.c_str(), "%d,%d,%d,%d", &inCPU, &inRAM, &inGPU, &inNight);
+
+      if (parsedCount >= 3) {
+        lastStatsReceived = now;
+
+        if (inCPU != lastCPU) { printProgressBar(inCPU / 100.0, 0); lastCPU = inCPU; }
+        if (inRAM != lastRAM) { printProgressBar(inRAM / 100.0, 1); lastRAM = inRAM; }
+        if (inGPU != lastGPU) { printProgressBar(inGPU / 100.0, 2); lastGPU = inGPU; }
+
+        animator.setStats(inCPU, inRAM, inGPU, inNight);
+
+        Serial.println("K");
+      }
     }
-    if(Serial.available() > 0) Serial.read(); // Consume the '\n'
-
-    lastStatsReceived = now;
-
-    if(inCPU != lastCPU) { printProgressBar(inCPU / 100.0, 0); lastCPU = inCPU; }
-    if(inRAM != lastRAM) { printProgressBar(inRAM / 100.0, 1); lastRAM = inRAM; }
-    if(inGPU != lastGPU) { printProgressBar(inGPU / 100.0, 2); lastGPU = inGPU; }
-
-    animator.setStats(inCPU, inRAM, inGPU, inNight);
-
-    Serial.println("K");
-    Serial.flush();
   }
 
+  // Periodic Temperature Reading
   static unsigned long lastTempUpdate = 0;
   if (now - lastTempUpdate >= 5000) {
       lastTempUpdate = now;
@@ -97,6 +115,7 @@ void loop() {
       lcdPrintTempAndColorContent(tempDisplay);
   }
 
+  // Periodic Display Refresh
   static unsigned long lastScreenReset = 0;
   if (now - lastScreenReset >= 60000) {
       lastScreenReset = now;
@@ -124,10 +143,16 @@ void lcdPrintStaticContent() {
 
 void tempReader() {
   int temperature = dht11.readTemperature();
+  
   if (temperature != DHT11::ERROR_CHECKSUM && temperature != DHT11::ERROR_TIMEOUT) {
-      CurrentTempInFarenheight = round(1.8 * temperature + 32);
-      temperatureHumidityString = "TEMP " + String(CurrentTempInFarenheight);
-      animator.setTemp(CurrentTempInFarenheight);
+      int convertedF = round(1.8 * temperature + 32);
+      
+      // Range validation check to reject impossible sensor glitches
+      if (convertedF >= 32 && convertedF <= 120) {
+          CurrentTempInFarenheight = convertedF;
+          temperatureHumidityString = "TEMP " + String(CurrentTempInFarenheight);
+          animator.setTemp(CurrentTempInFarenheight);
+      }
   }
 }
 
