@@ -2,6 +2,7 @@
 #define LED_ANIMATOR_H
 
 #include <FastLED_NeoPixel.h>
+#include <cstdint>
 
 class LEDAnimator {
 public:
@@ -32,10 +33,16 @@ public:
 
   uint32_t highCpuStartTime = 0;
   bool isHighStress = false;
-  const uint8_t CPU_HIGH_THRESHOLD = 75;  // %
-  const uint8_t RAM_HIGH_THRESHOLD = 70;  // %
-  const uint8_t GPU_HIGH_THRESHOLD = 60;
-  const uint32_t STRESS_HOLD_TIME_MS = 1500;  // 1.5 seconds sustained load trigger
+  // Configurable High Load Thresholds
+  const uint8_t CPU_HIGH_THRESHOLD = 50;   // % (Lowered from 75 to match graph load)
+  const uint8_t RAM_HIGH_THRESHOLD = 70;   // %
+  const uint8_t GPU_HIGH_THRESHOLD = 60;   // %
+  const uint8_t TEMP_HIGH_THRESHOLD = 90;  // °F
+
+  uint32_t lowCpuStartTime = 0;
+  const uint32_t STRESS_HOLD_TIME_MS = 1500;     // Sustained load required to enter
+  const uint32_t STRESS_RELEASE_TIME_MS = 3000;  // Hysteresis: requires 3s of continuous low load to exit
+
 
   // MODIFIED: Removed '0' (Red) and shifted palette to start at 32 (Orange/Yellow) up to 192 (Purple)
   uint8_t palette[6] = { 32, 64, 96, 128, 160, 192 };  
@@ -89,6 +96,12 @@ public:
     gpu = g;
     isNight = (nightFlag == 1);
     lastStatsUpdate = millis();
+
+    // If stats were cleared due to daemon timeout, break out of high stress
+    if (c == 0 && r == 0 && g == 0 && phase == HIGH_STRESS) {
+      isHighStress = false;
+      phase = COLOR_FADE;
+    }
   }
 
   void setTemp(int t) {
@@ -122,10 +135,32 @@ public:
       return;
     }
 
-    // Priority 2: High System Load (Aggressive Red Strobe)
+    // Priority 2: High System Load (Progressive 30s Red Speed Escalation)
     if (phase == HIGH_STRESS) {
-      bool flashOn = (now / 150) % 2 == 0;
-      renderSolidHSV(0, 255, flashOn ? 255 : 0); // Pure Red (Hue 0) preserved here!
+      uint32_t elapsed = now - phaseStart;
+
+      if (elapsed < 30000) {
+        // 0 - 30s: Slow breathing (15 BPM)
+        uint8_t breath = beatsin8(15, 20, 255);
+        renderSolidHSV(0, 255, breath);
+      } else if (elapsed < 60000) {
+        // 30s - 60s: Faster pulse (35 BPM)
+        uint8_t breath = beatsin8(35, 10, 255);
+        renderSolidHSV(0, 255, breath);
+      } else if (elapsed < 90000) {
+        // 60s - 90s: Faster pulse (75 BPM)
+        uint8_t breath = beatsin8(75, 0, 255);
+        renderSolidHSV(0, 255, breath);
+      } else if (elapsed < 120000) {
+        // 90s - 120s: Rapid pulse (150 BPM)
+        uint8_t breath = beatsin8(150, 0, 255);
+        renderSolidHSV(0, 255, breath);
+      } else {
+        // 120s+ (2+ min): Maximum flashing strobe
+        bool flashOn = (now / 80) % 2 == 0;
+        renderSolidHSV(0, 255, flashOn ? 255 : 0);
+      }
+
       strip->show();
       return;
     }
@@ -178,30 +213,65 @@ public:
     strip->show();
   }
 
+  void playBootAnimation() {
+    // Fast color fill sweep
+    for (int i = 0; i < 81; i++) {
+      strip->setPixelColor(i, strip->gamma32(strip->ColorHSV(140 * 256, 255, 200)));
+      strip->show();
+      delay(12);
+    }
+    delay(150);
+
+    // Smooth dim out
+    for (int b = 200; b >= 0; b -= 15) {
+      for (int i = 0; i < 81; i++) {
+        strip->setPixelColor(i, strip->gamma32(strip->ColorHSV(140 * 256, 255, b)));
+      }
+      strip->show();
+      delay(10);
+    }
+    strip->clear();
+    strip->show();
+  }
+  
 private:
   void checkHighStress(uint32_t now) {
     if (phase == TEMP_ALERT)
       return;
 
-    bool resourcesHigh = (cpu >= CPU_HIGH_THRESHOLD) || (ram >= RAM_HIGH_THRESHOLD) || (gpu >= GPU_HIGH_THRESHOLD);
+    bool resourcesHigh = (cpu >= CPU_HIGH_THRESHOLD) || 
+                         (ram >= RAM_HIGH_THRESHOLD) || 
+                         (gpu >= GPU_HIGH_THRESHOLD) ||
+                         (tempF >= TEMP_HIGH_THRESHOLD);
 
     if (resourcesHigh) {
+      lowCpuStartTime = 0; // Reset release timer
       if (highCpuStartTime == 0)
         highCpuStartTime = now;
+
       if (now - highCpuStartTime >= STRESS_HOLD_TIME_MS) {
         if (!isHighStress) {
-          returnPhase = phase;
+          if (phase != HIGH_STRESS && phase != TEMP_ALERT) {
+            returnPhase = phase;
+          }
           phase = HIGH_STRESS;
-          phaseStart = now;
+          phaseStart = now; // Starts the 30-second escalation timer
           isHighStress = true;
         }
       }
     } else {
-      highCpuStartTime = 0;
-      if (isHighStress) {
-        phase = returnPhase;
-        phaseStart = now;
-        isHighStress = false;
+      highCpuStartTime = 0; // Reset entry timer
+      if (isHighStress || phase == HIGH_STRESS) {
+        if (lowCpuStartTime == 0)
+          lowCpuStartTime = now;
+
+        // Prevent exiting high stress on brief load dips
+        if (now - lowCpuStartTime >= STRESS_RELEASE_TIME_MS) {
+          phase = (returnPhase == HIGH_STRESS) ? COLOR_FADE : returnPhase;
+          phaseStart = now;
+          isHighStress = false;
+          lowCpuStartTime = 0;
+        }
       }
     }
   }
@@ -238,9 +308,12 @@ private:
 
   void maybeTriggerTempAlert(uint32_t now) {
     static uint32_t lastAlertTime = 0;
-    if (tempF > 85 && (now - lastAlertTime > 30000)) {
+    // Threshold raised to 95°F to prevent false triggers from normal room temps
+    if (tempF > 95 && (now - lastAlertTime > 30000)) {
       lastAlertTime = now;
-      returnPhase = phase;
+      if (phase != TEMP_ALERT && phase != HIGH_STRESS) {
+        returnPhase = phase;
+      }
       phase = TEMP_ALERT;
       phaseStart = now;
       tempFlashCount = 0;

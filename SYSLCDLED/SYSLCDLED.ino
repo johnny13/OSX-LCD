@@ -57,6 +57,9 @@ void setup() {
   pixelStrip.begin();
   pixelStrip.setBrightness(BRIGHTNESS);
 
+  // Run boot animation before enabling LCD and serial checks
+  animator.playBootAnimation();
+  
   lcd.backlight();
   lcd.begin(20, 4);
   lcd.createChar(0, unused);
